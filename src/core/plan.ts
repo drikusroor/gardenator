@@ -515,7 +515,7 @@ export function takeOff(doc: GardenDoc): string[] {
   let fenceLength = 0;
 
   for (const object of doc.objects) {
-    if (object.hidden) continue;
+    if (object.hidden || object.existing) continue;
     switch (object.type) {
       case 'surface': {
         const key = object.ground.kind;

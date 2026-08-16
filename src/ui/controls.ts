@@ -212,7 +212,10 @@ export function toggle(options: ToggleOptions): HTMLElement {
   input.addEventListener('change', () => options.onChange(input.checked));
   return el('label', { class: 'field field-toggle' }, [
     input,
-    el('span', { class: 'field-label' }, [options.label]),
+    el('span', { class: 'field-toggle-text' }, [
+      el('span', { class: 'field-label' }, [options.label]),
+      options.hint ? el('span', { class: 'field-hint' }, [options.hint]) : null,
+    ]),
   ]);
 }
 

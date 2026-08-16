@@ -175,6 +175,7 @@ function base(name: string, patch: Base = {}) {
     elevation: patch.elevation ?? 0,
     locked: false,
     hidden: false,
+    existing: false,
   };
 }
 

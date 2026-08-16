@@ -169,6 +169,10 @@ body {
   touch-action: none;
 }
 
+.viewport-canvas.is-looking {
+  cursor: grabbing;
+}
+
 .status-bar {
   display: flex;
   align-items: center;
@@ -472,6 +476,13 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 8px;
+}
+
+.field-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .input-checkbox {
