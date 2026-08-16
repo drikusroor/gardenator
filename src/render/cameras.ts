@@ -198,8 +198,8 @@ export class CameraRig {
       if (wish.lengthSq() > 0 && (this.keys.has('KeyW') || this.keys.has('KeyS'))) {
         wish.y += Math.sin(this.pitch) * (this.keys.has('KeyS') ? -1 : 1);
       }
-      if (this.keys.has('KeyE') || this.keys.has('Space')) wish.y += 1;
-      if (this.keys.has('KeyQ') || this.keys.has('ControlLeft')) wish.y -= 1;
+      if (this.keys.has('KeyQ') || this.keys.has('Space')) wish.y += 1;
+      if (this.keys.has('KeyZ') || this.keys.has('ControlLeft')) wish.y -= 1;
     }
 
     if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(speed);
