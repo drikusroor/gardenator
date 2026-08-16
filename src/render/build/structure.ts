@@ -129,7 +129,10 @@ function buildShed(object: StructureObject, _ctx: BuildContext): THREE.Group {
     shape.closePath();
     const geometry = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false });
     geometry.translate(0, 0, -thickness / 2);
-    geometry.rotateY(Math.PI / 2);
+    // rotateY(+90deg) would flip shape-x to -z, swapping which eave lands at
+    // the front vs the back; -90deg keeps shape-x mapped straight onto z so
+    // the low/high corners line up with the front and back wall panels.
+    geometry.rotateY(-Math.PI / 2);
     const wall = mesh(geometry, material);
     wall.position.x = (side * w) / 2;
     group.add(wall);

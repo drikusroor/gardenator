@@ -144,14 +144,17 @@ export function buildMasonry(
       const length = distance(a, b);
       if (length < 1e-6) continue;
       const dir = normalize(sub(b, a));
+      // boxMatrix's depth axis (not width) rotates to run along `dir`, so the
+      // along-wall span and the block's through-wall depth are swapped here
+      // relative to their natural width/depth argument order.
       core.push(
         boxMatrix(
           (a.x + b.x) / 2,
           0,
           (a.z + b.z) / 2,
-          length + spec.depth,
-          wallHeight(spec, courses),
           spec.depth * 0.86,
+          wallHeight(spec, courses),
+          length + spec.depth,
           Math.atan2(dir.x, dir.z),
         ),
       );
@@ -163,7 +166,7 @@ export function buildMasonry(
   const blocks = instanced(
     UNIT_BOX,
     faceMaterial(spec.texture, spec.color),
-    placements.map((p) => boxMatrix(p.x, p.y, p.z, p.length, p.height, p.depth, p.angle)),
+    placements.map((p) => boxMatrix(p.x, p.y, p.z, p.depth, p.height, p.length, p.angle)),
   );
   if (blocks) group.add(blocks);
 
@@ -186,9 +189,9 @@ export function buildMasonry(
           (a.x + b.x) / 2,
           top,
           (a.z + b.z) / 2,
-          length + spec.depth + overhang * 2,
-          thickness,
           spec.depth + overhang * 2,
+          thickness,
+          length + spec.depth + overhang * 2,
           Math.atan2(dir.x, dir.z),
         ),
       );
