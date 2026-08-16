@@ -763,12 +763,16 @@ body {
   max-height: 72vh;
 }
 
-/* Fill the modal rather than rendering at the SVG's own paper size: the
-   downloaded file keeps true scale, the preview stays readable. */
+/* Fit the whole sheet inside the modal rather than rendering at the SVG's own
+   paper size. The downloaded file keeps true scale; the preview just has to
+   show the entire drawing at once. */
 .plan-preview svg {
   display: block;
-  width: 100%;
+  margin: 0 auto;
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: 66vh;
 }
 
 .plan-actions {

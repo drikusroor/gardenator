@@ -327,30 +327,49 @@ function drawObject(ctx: Ctx, object: GardenObject) {
  */
 const MIN_DIMENSIONED_EDGE = 0.5;
 const DIM_OFFSET = 0.38;
+/** How close to the plot line counts as "on" it. */
+const BOUNDARY_TOLERANCE = 0.2;
+
+/**
+ * True when an edge runs along the plot line. Those edges are skipped: the
+ * overall site dimension already states that length, and stacking two
+ * captions on the same line is how a drawing becomes unreadable.
+ */
+function onSiteBoundary(ctx: Ctx, a: Vec2, b: Vec2): boolean {
+  const w = ctx.doc.site.width / 2;
+  const d = ctx.doc.site.depth / 2;
+  const near = (value: number, edge: number) => Math.abs(value - edge) < BOUNDARY_TOLERANCE;
+  return (
+    (near(a.x, -w) && near(b.x, -w)) ||
+    (near(a.x, w) && near(b.x, w)) ||
+    (near(a.z, -d) && near(b.z, -d)) ||
+    (near(a.z, d) && near(b.z, d))
+  );
+}
 
 function drawDimensions(ctx: Ctx, object: GardenObject) {
+  const dimension = (a: Vec2, b: Vec2) => {
+    if (distance(a, b) < MIN_DIMENSIONED_EDGE) return;
+    if (onSiteBoundary(ctx, a, b)) return;
+    drawDimensionLine(ctx, a, b, DIM_OFFSET, '#1c2430');
+  };
+
   if (object.type === 'surface') {
     const points = worldPoints(object, object.points);
     for (let i = 0; i < points.length; i++) {
-      const a = points[i];
-      const b = points[(i + 1) % points.length];
-      if (distance(a, b) < MIN_DIMENSIONED_EDGE) continue;
-      drawDimensionLine(ctx, a, b, DIM_OFFSET, '#1c2430');
+      dimension(points[i], points[(i + 1) % points.length]);
     }
     return;
   }
   if (object.type === 'wall' || object.type === 'fence') {
     const points = worldPoints(object, object.path);
-    for (let i = 0; i < points.length - 1; i++) {
-      if (distance(points[i], points[i + 1]) < MIN_DIMENSIONED_EDGE) continue;
-      drawDimensionLine(ctx, points[i], points[i + 1], DIM_OFFSET, '#1c2430');
-    }
+    for (let i = 0; i < points.length - 1; i++) dimension(points[i], points[i + 1]);
     return;
   }
   if (object.type === 'structure') {
     const ring = worldPoints(object, rectangle(object.width, object.depth));
-    drawDimensionLine(ctx, ring[0], ring[1], DIM_OFFSET, '#1c2430');
-    drawDimensionLine(ctx, ring[1], ring[2], DIM_OFFSET, '#1c2430');
+    dimension(ring[0], ring[1]);
+    dimension(ring[1], ring[2]);
   }
 }
 
