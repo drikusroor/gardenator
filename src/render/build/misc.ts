@@ -1,7 +1,7 @@
 /** The scale-reference figure, single paving units, and dimension markers. */
 
 import * as THREE from 'three';
-import { distance } from '../../core/geometry';
+import { distance, perimeter } from '../../core/geometry';
 import { formatShort } from '../../core/units';
 import type { MeasureObject, PersonObject, TileObject, Vec2 } from '../../core/types';
 import { faceMaterial, lineMaterial, plainMaterial } from '../materials';
@@ -75,23 +75,43 @@ export function buildTile(object: TileObject, ctx: BuildContext): THREE.Group {
   return group;
 }
 
-/** A dimension line with ticks and a readable label, drawn in the 3D view. */
+/**
+ * A dimension line with ticks and a readable label, drawn in the 3D view.
+ *
+ * Doubles as a scaffolding ruler: like any shaped object, more points can be
+ * added along it (the green diamond on an edge) to lay out a bent or
+ * multi-span reference — each span gets its own label, plus a running total
+ * once there is more than one.
+ */
 export function buildMeasure(object: MeasureObject, ctx: BuildContext): THREE.Group {
   const group = new THREE.Group();
-  if (object.path.length < 2) return group;
-  const a = object.path[0];
-  const b = object.path[1];
-  const length = distance(a, b);
+  const points = object.path;
+  if (points.length < 2) return group;
   const y = 0.02 + ctx.layer * LAYER_LIFT;
 
-  group.add(dimensionLine(a, b, y, '#ffd166'));
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    group.add(dimensionLine(a, b, y, '#ffd166'));
 
-  const label = makeLabel(formatShort(length), {
-    background: 'rgba(24,26,30,0.9)',
-    color: '#ffd166',
-  });
-  label.position.set((a.x + b.x) / 2, y + 0.18, (a.z + b.z) / 2);
-  group.add(label);
+    const label = makeLabel(formatShort(distance(a, b)), {
+      background: 'rgba(24,26,30,0.9)',
+      color: '#ffd166',
+    });
+    label.position.set((a.x + b.x) / 2, y + 0.18, (a.z + b.z) / 2);
+    group.add(label);
+  }
+
+  if (points.length > 2) {
+    const last = points[points.length - 1];
+    const total = makeLabel(`Totaal ${formatShort(perimeter(points, false))}`, {
+      background: 'rgba(24,26,30,0.9)',
+      color: '#ffd166',
+      bold: true,
+    });
+    total.position.set(last.x, y + 0.34, last.z);
+    group.add(total);
+  }
   return group;
 }
 

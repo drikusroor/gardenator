@@ -42,8 +42,15 @@ deploy by hand from the Actions tab (`workflow_dispatch`).
 | Mode | How it works |
 | --- | --- |
 | **Baan** (orbit) | Left-drag swings the camera round a point on the ground, right-drag slides that point, scroll zooms. |
-| **Vliegen** (fly) | `W A S D` to move, `Q`/`E` down and up, hold the right mouse button to look around. The scroll wheel changes speed. |
-| **Lopen** (walk) | `W A S D` at standing height, drag to look. Eye height is whatever you set under **Omgeving → Ooghoogte** — set it to your own height and the view is what you would really see. |
+| **Vliegen** (fly) | `W A S D` to move, `Q`/`E` down and up. Click into the view to look around, `Esc` (or another click) lets go. The scroll wheel changes speed. |
+| **Lopen** (walk) | `W A S D` at standing height. Click into the view to look around, `Esc` (or another click) lets go. Eye height is whatever you set under **Omgeving → Ooghoogte** — set it to your own height and the view is what you would really see. |
+
+Fly and walk both look around with the browser's pointer lock, not a
+held-down mouse button — click captures the pointer, any mouse or trackpad
+movement turns the camera, and `Esc` (the browser's own pointer-lock
+shortcut) releases it. That is the same mechanism most browser-based
+walkthroughs and games use, and it is far friendlier to a trackpad than
+holding a button while dragging.
 
 Preset views (top, isometric, from the house) sit next to the mode buttons, and
 `F` frames the current selection.
@@ -66,8 +73,9 @@ Preset views (top, isometric, from the house) sit next to the mode buttons, and
 Select an object and you get the Blender-style red/green/blue axis gizmo plus a
 glowing outline. Shapes (surfaces, walls, fences, paths, light runs) also get
 per-vertex handles: drag a yellow ball to move a corner, click a green
-diamond on an edge to add one. Every edge shows its length while you drag, and
-while you draw.
+diamond on an edge to add one (handy for shaping a curve). Shift-click a
+yellow ball, or hover it and press `Delete`/`Backspace`, to remove that
+corner again. Every edge shows its length while you drag, and while you draw.
 
 ## What you can build
 
@@ -119,7 +127,12 @@ night with the festoon lights lit.
 - Type any length in whatever form is natural: `240`, `2,4 m`, `2m40`, `1500mm`.
   Arrow keys nudge, shift-arrow nudges by ten.
 - Snapping is configurable from 1 cm up to 1 m, or off.
-- The measure tool (`M`) drops a permanent dimension between two points.
+- The measure tool (`M`) drops a permanent dimension between two points — it
+  stays in the scene like everything else, so it also works as a ruler line
+  for scaffolding out a layout before you build it. Select it afterwards and
+  it gets the same vertex handles as any other shape: drag its ends to
+  reposition it, or click the green diamond on a span to bend it into a
+  multi-point reference line, with each span and the running total labelled.
 - **Plattegrond** produces a dimensioned scale drawing as SVG or PNG: outlines
   of everything, the actual paving setting-out, edge dimensions, north arrow,
   scale bar, legend and a materials take-off (m² per ground type, tiles per

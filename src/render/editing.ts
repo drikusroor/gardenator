@@ -116,7 +116,9 @@ export class Editor {
     } else if (tool.kind === 'place') {
       this.events.onStatus?.(`Klik in de tuin om ${tool.label} te plaatsen · Esc annuleert`);
     } else if (tool.kind === 'measure') {
-      this.events.onStatus?.('Klik twee punten om een maat te zetten · Esc annuleert');
+      this.events.onStatus?.(
+        'Klik twee punten om een meetlat te zetten · Esc annuleert · selecteer hem daarna om punten toe te voegen en als hulplijn uit te zetten',
+      );
     } else {
       this.events.onStatus?.('');
     }
@@ -309,6 +311,14 @@ export class Editor {
           const handle = hit.object as THREE.Mesh;
           if (typeof handle.userData.insertAfter === 'number') {
             this.insertVertex(handle.userData.insertAfter as number);
+            downAt = null;
+            return;
+          }
+          if (event.shiftKey) {
+            // Shift+click a corner handle to remove it again — the inverse of
+            // the diamond that split the edge into two in the first place.
+            this.hoveredHandle = handle;
+            this.deleteHoveredVertex();
             downAt = null;
             return;
           }

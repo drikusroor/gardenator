@@ -2,9 +2,16 @@
  * Three ways to look at the garden.
  *
  * - orbit: drag to swing round a focus point on the ground, right-drag to pan.
- * - fly:   WASD/QE with right-button mouse-look, for getting anywhere fast.
+ * - fly:   WASD/QE to move; click into the view to look around.
  * - walk:  eye height locked to the reference person, so what you see through
- *          the camera is what you would see standing there.
+ *          the camera is what you would see standing there; click to look.
+ *
+ * Fly and walk both use the Pointer Lock API for looking around rather than
+ * "hold a mouse button and drag": a held-button drag is the awkward part on
+ * a trackpad (two-finger-click-and-drag fights the OS's own gestures), and
+ * pointer lock is the standard, input-agnostic way browsers offer free look
+ * — click once to capture the pointer, move the mouse or trackpad to look,
+ * `Esc` (or another click) to let go of it again.
  */
 
 import * as THREE from 'three';
@@ -72,11 +79,14 @@ export class CameraRig {
 
     const onPointerDown = (event: PointerEvent) => {
       if (this.mode === 'orbit') return;
-      // Right button (or any button in walk mode) starts a free look.
-      if (event.button === 2 || this.mode === 'walk') {
-        this.looking = true;
-        this.element.setPointerCapture(event.pointerId);
-      }
+      if (event.button !== 0) return;
+      // Already looking: let the click through (it may also be a selection
+      // click) rather than fighting the pointer lock request.
+      if (document.pointerLockElement === this.element) return;
+      this.element.requestPointerLock();
+    };
+    const onPointerLockChange = () => {
+      this.looking = document.pointerLockElement === this.element;
     };
     const onPointerMove = (event: PointerEvent) => {
       if (!this.looking || this.mode === 'orbit') return;
@@ -85,15 +95,7 @@ export class CameraRig {
       this.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.pitch));
       this.applyLook();
     };
-    const onPointerUp = (event: PointerEvent) => {
-      if (!this.looking) return;
-      this.looking = false;
-      if (this.element.hasPointerCapture(event.pointerId)) {
-        this.element.releasePointerCapture(event.pointerId);
-      }
-    };
     const onContextMenu = (event: MouseEvent) => {
-      // Right-drag is a look/pan gesture here, so suppress the browser menu.
       event.preventDefault();
     };
     const onWheel = (event: WheelEvent) => {
@@ -108,7 +110,7 @@ export class CameraRig {
     window.addEventListener('blur', onBlur);
     this.element.addEventListener('pointerdown', onPointerDown);
     this.element.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointerlockchange', onPointerLockChange);
     this.element.addEventListener('contextmenu', onContextMenu);
     this.element.addEventListener('wheel', onWheel, { passive: false });
 
@@ -118,9 +120,10 @@ export class CameraRig {
       window.removeEventListener('blur', onBlur);
       this.element.removeEventListener('pointerdown', onPointerDown);
       this.element.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointerlockchange', onPointerLockChange);
       this.element.removeEventListener('contextmenu', onContextMenu);
       this.element.removeEventListener('wheel', onWheel);
+      if (document.pointerLockElement === this.element) document.exitPointerLock();
     });
   }
 
@@ -131,6 +134,8 @@ export class CameraRig {
     const previous = this.mode;
     this.mode = mode;
     this.orbit.enabled = mode === 'orbit';
+
+    if (document.pointerLockElement === this.element) document.exitPointerLock();
 
     if (mode === 'orbit') {
       // Re-anchor the orbit target in front of wherever the free camera ended
