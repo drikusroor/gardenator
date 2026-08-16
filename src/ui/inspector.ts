@@ -6,7 +6,7 @@
  * paving slabs.
  */
 
-import { PLANT_PRESETS, TYPE_LABELS, blockSpec, tileSpec } from '../core/factory';
+import { PLANT_PRESETS, TYPE_LABELS, blockSpec, isClosedShape, isShaped, shapePoints, tileSpec } from '../core/factory';
 import { area, distance, perimeter } from '../core/geometry';
 import type { Store } from '../core/store';
 import type {
@@ -15,6 +15,7 @@ import type {
   GroundKind,
   PlantSpecies,
   TileSpec,
+  Vec2,
 } from '../core/types';
 import { formatArea, formatShort } from '../core/units';
 import { layBlocks, wallHeight } from '../render/build/masonry';
@@ -695,7 +696,163 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
   }
 
+  if (isShaped(object)) {
+    const vertices = verticesSection(host, object);
+    if (vertices) root.append(vertices);
+  }
+
   return root;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Exact coordinates                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Lets a shape be typed in exactly instead of only dragged into place —
+ * dragging a corner or the scale gizmo by eye is what turns a "5 metre"
+ * patch into 5.02 or 4.97. A plain rectangle gets a width/depth shortcut, a
+ * straight two-point path (wall, fence, string light) gets a single length,
+ * and anything else falls back to per-corner X/Z fields.
+ */
+function verticesSection(host: InspectorHost, object: GardenObject): HTMLElement | null {
+  const points = shapePoints(object);
+  if (!points || points.length === 0) return null;
+  const { store } = host;
+  const unit = store.doc.view.unit;
+  const closed = isClosedShape(object);
+  const rows: SectionChild[] = [];
+
+  const rect = closed ? rectangleSize(points) : null;
+  if (rect) {
+    rows.push(
+      row(
+        [
+          lengthField({
+            label: 'Breedte',
+            value: rect.width,
+            unit,
+            min: 0.05,
+            onChange: (value) =>
+              store.patch(object.id, (o) => {
+                const p = shapePoints(o);
+                if (p) resizeRectangle(p, value, rect.depth, rect.center);
+              }),
+          }),
+          lengthField({
+            label: 'Diepte',
+            value: rect.depth,
+            unit,
+            min: 0.05,
+            onChange: (value) =>
+              store.patch(object.id, (o) => {
+                const p = shapePoints(o);
+                if (p) resizeRectangle(p, rect.width, value, rect.center);
+              }),
+          }),
+        ],
+        'row-pair',
+      ),
+      note('Rekt symmetrisch rond het midden van het vlak.'),
+    );
+  } else if (!closed && points.length === 2) {
+    rows.push(
+      lengthField({
+        label: 'Lengte',
+        value: distance(points[0], points[1]),
+        unit,
+        min: 0.02,
+        onChange: (value) =>
+          store.patch(object.id, (o) => {
+            const p = shapePoints(o);
+            if (p) resizeSegment(p, value);
+          }),
+      }),
+    );
+  } else {
+    points.forEach((point, index) => {
+      rows.push(
+        row(
+          [
+            lengthField({
+              label: `Punt ${index + 1} · X`,
+              value: point.x,
+              unit,
+              onChange: (value) =>
+                store.patch(object.id, (o) => {
+                  const p = shapePoints(o);
+                  if (p?.[index]) p[index] = { ...p[index], x: value };
+                }),
+            }),
+            lengthField({
+              label: `Punt ${index + 1} · Z`,
+              value: point.z,
+              unit,
+              onChange: (value) =>
+                store.patch(object.id, (o) => {
+                  const p = shapePoints(o);
+                  if (p?.[index]) p[index] = { ...p[index], z: value };
+                }),
+            }),
+          ],
+          'row-pair',
+        ),
+      );
+    });
+  }
+
+  return persistentSection('vertices', 'Hoekpunten (exact)', rows, { collapsed: true });
+}
+
+/** Detects a plain axis-aligned rectangle so it can be resized by width/depth. */
+function rectangleSize(points: Vec2[]): { width: number; depth: number; center: Vec2 } | null {
+  if (points.length !== 4) return null;
+  const xs = points.map((p) => p.x);
+  const zs = points.map((p) => p.z);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+  const width = maxX - minX;
+  const depth = maxZ - minZ;
+  if (width < 0.05 || depth < 0.05) return null;
+
+  const eps = 0.01;
+  const corners = new Set<string>();
+  for (const p of points) {
+    const onMinX = Math.abs(p.x - minX) < eps;
+    const onMaxX = Math.abs(p.x - maxX) < eps;
+    const onMinZ = Math.abs(p.z - minZ) < eps;
+    const onMaxZ = Math.abs(p.z - maxZ) < eps;
+    if (!((onMinX || onMaxX) && (onMinZ || onMaxZ))) return null;
+    corners.add(`${onMaxX ? 1 : 0}:${onMaxZ ? 1 : 0}`);
+  }
+  // Four points each on a distinct corner — anything else is not a rectangle.
+  if (corners.size !== 4) return null;
+
+  return { width, depth, center: { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 } };
+}
+
+/** Rewrites a rectangle's corners to a new size, stretched from its centre. */
+function resizeRectangle(points: Vec2[], width: number, depth: number, center: Vec2) {
+  const hw = width / 2;
+  const hd = depth / 2;
+  for (const p of points) {
+    const signX = p.x >= center.x ? 1 : -1;
+    const signZ = p.z >= center.z ? 1 : -1;
+    p.x = center.x + signX * hw;
+    p.z = center.z + signZ * hd;
+  }
+}
+
+/** Rewrites a two-point path's length, keeping the start point and heading. */
+function resizeSegment(points: Vec2[], length: number) {
+  const [a, b] = points;
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const current = Math.hypot(dx, dz);
+  const [ux, uz] = current > 1e-6 ? [dx / current, dz / current] : [1, 0];
+  points[1] = { x: a.x + ux * length, z: a.z + uz * length };
 }
 
 /* -------------------------------------------------------------------------- */

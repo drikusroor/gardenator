@@ -176,6 +176,7 @@ export class Editor {
         target.rotation = this.proxy.rotation.y;
       } else if (this.scaleBaseline) {
         applyScale(target, this.scaleBaseline, this.proxy.scale);
+        if (this.snap > 0) snapScaledDimensions(target, this.snap);
       }
     });
 
@@ -388,7 +389,18 @@ export class Editor {
     };
 
     const onDoubleClick = () => {
-      if (this.tool.kind === 'draw') this.finishDraft();
+      if (this.tool.kind !== 'draw') return;
+      // The second click of a double-click also fires as an ordinary
+      // pointerup and already appended a point before this event runs.
+      // That point lands on (or right next to) the one before it, since the
+      // pointer barely moves between the two clicks of a double-click — drop
+      // it so finishing a shape doesn't leave a spurious extra vertex.
+      if (this.draft.length >= 2) {
+        const last = this.draft[this.draft.length - 1];
+        const prev = this.draft[this.draft.length - 2];
+        if (distance(last, prev) < Math.max(0.02, this.snap)) this.draft.pop();
+      }
+      this.finishDraft();
     };
 
     element.addEventListener('pointerdown', onPointerDown);
@@ -700,6 +712,49 @@ function applyScale(target: GardenObject, baseline: GardenObject, scale: THREE.V
       target.height = (baseline as typeof target).height * sy;
       return;
     }
+  }
+}
+
+/**
+ * Rounds a just-scaled object's dimensions to the grid, the same way a
+ * translate or vertex drag already does. Without this, dragging the scale
+ * gizmo by eye reliably lands a "5 metre" patch at 5.02 or 4.97 instead.
+ */
+function snapScaledDimensions(target: GardenObject, step: number) {
+  switch (target.type) {
+    case 'surface':
+      target.points = target.points.map((p) => snapPoint(p, step));
+      target.raise = snapValue(target.raise, step);
+      return;
+    case 'wall':
+    case 'fence':
+    case 'path':
+    case 'measure':
+      target.path = target.path.map((p) => snapPoint(p, step));
+      if (target.type === 'fence') target.height = snapValue(target.height, step);
+      if (target.type === 'path') target.width = snapValue(target.width, step);
+      return;
+    case 'structure':
+    case 'furniture':
+      target.width = snapValue(target.width, step);
+      target.depth = snapValue(target.depth, step);
+      target.height = snapValue(target.height, step);
+      return;
+    case 'plant':
+      target.height = snapValue(target.height, step);
+      target.spread = snapValue(target.spread, step);
+      return;
+    case 'person':
+    case 'light':
+      target.height = snapValue(target.height, step);
+      return;
+    case 'tile':
+      target.tile = {
+        ...target.tile,
+        width: snapValue(target.tile.width, step),
+        depth: snapValue(target.tile.depth, step),
+      };
+      return;
   }
 }
 

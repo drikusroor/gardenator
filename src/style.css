@@ -169,6 +169,10 @@ body {
   touch-action: none;
 }
 
+.viewport-canvas.is-looking {
+  cursor: grabbing;
+}
+
 .status-bar {
   display: flex;
   align-items: center;
