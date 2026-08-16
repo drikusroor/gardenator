@@ -635,6 +635,7 @@ export class App {
     const svg = buildPlanSvg(this.store.doc, DEFAULT_PLAN_OPTIONS);
     const preview = el('div', { class: 'plan-preview', innerHTML: svg });
     const lines = takeOff(this.store.doc);
+    const existingCount = this.store.doc.objects.filter((o) => o.existing && !o.hidden).length;
 
     // The drawing already carries its own legend and take-off, so the modal
     // only adds what the drawing cannot: the export actions.
@@ -644,7 +645,10 @@ export class App {
         preview,
         el('div', { class: 'plan-actions' }, [
           el('span', { class: 'note' }, [
-            `${lines.length} regels materiaalstaat · schaal 1:${Math.round(1000 / DEFAULT_PLAN_OPTIONS.scale)} · maten in meters`,
+            `${lines.length} regels materiaalstaat · schaal 1:${Math.round(1000 / DEFAULT_PLAN_OPTIONS.scale)} · maten in meters` +
+              (existingCount > 0
+                ? ` · ${existingCount} object${existingCount === 1 ? '' : 'en'} staat/staan er al en telt/tellen niet mee`
+                : ''),
           ]),
           row([
             button({

@@ -120,6 +120,12 @@ export function renderInspector(host: InspectorHost): HTMLElement {
           onChange: (value) => store.patch(object.id, (o) => void (o.locked = value)),
         }),
       ]),
+      toggle({
+        label: 'Staat er al',
+        hint: 'Niet meetellen in de materiaalstaat — je hoeft dit niet meer te kopen.',
+        value: Boolean(object.existing),
+        onChange: (value) => store.patch(object.id, (o) => void (o.existing = value)),
+      }),
       row([
         button({ label: 'Dupliceer', icon: ICONS.copy, onClick: () => store.duplicate([object.id]) }),
         button({
@@ -216,10 +222,13 @@ export function renderInspector(host: InspectorHost): HTMLElement {
             commit,
           ),
         ),
-        takeOffSection([
-          `Stenen nodig: ${layBlocks(object.path, object.block, object.courses, { closed: false }).length} stuks`,
-          `Waarvan gezaagd: ${layBlocks(object.path, object.block, object.courses, { closed: false }).filter((b) => b.cut).length}`,
-        ]),
+        takeOffSection(
+          [
+            `Stenen nodig: ${layBlocks(object.path, object.block, object.courses, { closed: false }).length} stuks`,
+            `Waarvan gezaagd: ${layBlocks(object.path, object.block, object.courses, { closed: false }).filter((b) => b.cut).length}`,
+          ],
+          object.existing,
+        ),
       );
       break;
     case 'fence':
@@ -363,9 +372,10 @@ export function renderInspector(host: InspectorHost): HTMLElement {
             commit,
           ),
         ),
-        takeOffSection([
-          `Tegels nodig: ${outline.length >= 3 ? layTiles(outline, object.tile, 0).length : 0} stuks`,
-        ]),
+        takeOffSection(
+          [`Tegels nodig: ${outline.length >= 3 ? layTiles(outline, object.tile, 0).length : 0} stuks`],
+          object.existing,
+        ),
       );
       break;
     }
@@ -971,10 +981,13 @@ function surfaceSections(
       ),
     );
     sections.push(
-      takeOffSection([
-        `Tegels nodig: ${layTiles(object.points, spec, object.ground.patternAngle ?? 0).length} stuks`,
-        `Oppervlak: ${formatArea(area(object.points))}`,
-      ]),
+      takeOffSection(
+        [
+          `Tegels nodig: ${layTiles(object.points, spec, object.ground.patternAngle ?? 0).length} stuks`,
+          `Oppervlak: ${formatArea(area(object.points))}`,
+        ],
+        object.existing,
+      ),
     );
   }
 
@@ -1548,10 +1561,9 @@ export function tileSection(
   );
 }
 
-function takeOffSection(lines: string[]): HTMLElement {
-  return persistentSection(
-    'takeoff',
-    'Materiaal',
-    lines.map((line) => note(line)),
-  );
+function takeOffSection(lines: string[], existing?: boolean): HTMLElement {
+  return persistentSection('takeoff', 'Materiaal', [
+    existing ? note('Staat er al — telt niet mee in de materiaalstaat.') : null,
+    ...lines.map((line) => note(line)),
+  ]);
 }

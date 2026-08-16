@@ -93,6 +93,13 @@ interface ObjectBase {
   elevation: number;
   locked: boolean;
   hidden: boolean;
+  /**
+   * True when this already exists in the real garden (a wall, floor or item
+   * that is already there). Excluded from the material take-off so the
+   * shopping list only counts what still needs buying. Optional so older
+   * saved documents, which predate this field, default to "needs buying".
+   */
+  existing?: boolean;
 }
 
 /** A region of ground: a lawn, a tiled floor, a raised planting bed. */
