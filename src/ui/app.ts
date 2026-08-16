@@ -387,8 +387,8 @@ export class App {
       mode === 'orbit'
         ? 'Sleep met links om te draaien, met rechts om te verschuiven, scroll om te zoomen.'
         : mode === 'fly'
-          ? 'WASD om te vliegen, Q/E omlaag en omhoog, rechtermuisknop ingedrukt om rond te kijken.'
-          : 'WASD om te lopen, sleep om rond te kijken. Ooghoogte staat in het paneel Omgeving.',
+          ? 'WASD om te vliegen, Q/E omlaag en omhoog. Klik in beeld om rond te kijken, Esc om te stoppen.'
+          : 'WASD om te lopen. Klik in beeld om rond te kijken, Esc om te stoppen. Ooghoogte staat in het paneel Omgeving.',
     );
   }
 

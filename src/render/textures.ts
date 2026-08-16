@@ -248,25 +248,41 @@ export function faceTexture(kind: FaceTexture, color: string): THREE.Texture {
         }
         break;
       case 'rough':
-      case 'split':
-        // Broken-face concrete: chunky facets with a chipped top edge.
-        speckle(ctx, size, 420, 29, (r) => ({
-          color: shade(color, (r() - 0.5) * 0.26),
-          radius: 2 + r() * 9,
+        // Fine pitted aggregate — bumpy but not fractured.
+        speckle(ctx, size, 260, 29, (r) => ({
+          color: shade(color, (r() - 0.5) * 0.16),
+          radius: 1.5 + r() * 4,
         }));
-        for (let i = 0; i < 26; i++) {
-          ctx.fillStyle = shade(color, (random() - 0.5) * 0.2);
+        break;
+      case 'split': {
+        // Split-face stapelblok: a handful of large angular facets, the way
+        // a real broken-concrete face catches light in a few flat planes —
+        // fine speckle alone reads as loose rubble, not a stacked block.
+        const facets = 6 + Math.floor(random() * 3);
+        for (let i = 0; i < facets; i++) {
+          const cx = random() * size;
+          const cy = random() * size;
+          ctx.fillStyle = shade(color, (random() - 0.5) * 0.32);
           ctx.beginPath();
-          const x = random() * size;
-          const y = random() * size;
-          ctx.moveTo(x, y);
-          for (let k = 0; k < 4; k++) {
-            ctx.lineTo(x + (random() - 0.5) * 34, y + (random() - 0.5) * 26);
+          const points = 5 + Math.floor(random() * 3);
+          const r0 = size * (0.22 + random() * 0.18);
+          for (let k = 0; k < points; k++) {
+            const a = (k / points) * Math.PI * 2 + random() * 0.6;
+            const r = r0 * (0.6 + random() * 0.6);
+            const x = cx + Math.cos(a) * r;
+            const y = cy + Math.sin(a) * r;
+            if (k === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
           }
           ctx.closePath();
           ctx.fill();
         }
+        speckle(ctx, size, 140, 31, (r) => ({
+          color: shade(color, (r() - 0.5) * 0.12),
+          radius: 1 + r() * 2.4,
+        }));
         break;
+      }
       case 'brick':
         speckle(ctx, size, 900, 53, (r) => ({
           color: shade(color, (r() - 0.5) * 0.2),
@@ -280,6 +296,24 @@ export function faceTexture(kind: FaceTexture, color: string): THREE.Texture {
         }));
         break;
     }
+
+    if (kind === 'split' || kind === 'rough') {
+      // A dry-stacked stapelblok has no mortar joint, but each block still
+      // reads as its own unit because of the shadow line at its edge — draw
+      // that here so the wall doesn't dissolve into one continuous texture
+      // when the joint width is 0.
+      const bevel = size * 0.05;
+      ctx.strokeStyle = shade(color, -0.24);
+      ctx.lineWidth = bevel;
+      ctx.strokeRect(bevel / 2, bevel / 2, size - bevel, size - bevel);
+      ctx.strokeStyle = shade(color, 0.1);
+      ctx.lineWidth = bevel * 0.3;
+      ctx.beginPath();
+      ctx.moveTo(bevel * 0.7, bevel * 0.7);
+      ctx.lineTo(size - bevel * 0.7, bevel * 0.7);
+      ctx.stroke();
+    }
+
     return toTexture(el);
   });
 }

@@ -32,6 +32,28 @@ export interface InspectorHost {
   live: (id: string, mutate: (object: GardenObject) => void, commit: boolean) => void;
 }
 
+type SectionChild = Node | string | null | undefined | false;
+
+/**
+ * Collapse state for panel sections, keyed by a stable id and kept outside
+ * the render function so it survives the full-panel rebuild that follows
+ * every committed edit (see `renderPanels` in app.ts).
+ */
+const sectionCollapse = new Map<string, boolean>();
+
+function persistentSection(
+  key: string,
+  title: string,
+  children: SectionChild[],
+  options: { collapsed?: boolean; actions?: SectionChild[] } = {},
+): HTMLElement {
+  return section(title, children, {
+    collapsed: sectionCollapse.get(key) ?? options.collapsed ?? false,
+    onToggle: (collapsed) => sectionCollapse.set(key, collapsed),
+    actions: options.actions,
+  });
+}
+
 const GROUND_OPTIONS: { value: GroundKind; label: string }[] = [
   { value: 'grass', label: 'Gras' },
   { value: 'tiles', label: 'Tegels' },
@@ -78,7 +100,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
 
   /* ------------------------------------------------------------- identity */
   root.append(
-    section('Object', [
+    persistentSection('object', 'Object', [
       textField({
         label: 'Naam',
         value: object.name,
@@ -111,7 +133,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
 
   /* ------------------------------------------------------------ transform */
   root.append(
-    section('Plaats', [
+    persistentSection('placement', 'Plaats', [
       row(
         [
           lengthField({
@@ -161,7 +183,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
     case 'wall':
       root.append(
-        section('Muur', [
+        persistentSection('wall-main', 'Muur', [
           numberField({
             label: 'Aantal lagen',
             value: object.courses,
@@ -201,7 +223,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
     case 'fence':
       root.append(
-        section('Schutting', [
+        persistentSection('fence-main', 'Schutting', [
           lengthField({
             label: 'Hoogte',
             value: object.height,
@@ -288,7 +310,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
     case 'path': {
       const outline = pathOutline(object);
       root.append(
-        section('Pad', [
+        persistentSection('path-main', 'Pad', [
           lengthField({
             label: 'Breedte',
             value: object.width,
@@ -361,7 +383,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
     case 'plant':
       root.append(
-        section('Plant', [
+        persistentSection('plant-main', 'Plant', [
           select({
             label: 'Soort',
             value: object.species,
@@ -453,7 +475,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
     case 'furniture':
       root.append(
-        section('Meubel', [
+        persistentSection('furniture-main', 'Meubel', [
           row(
             [
               lengthField({
@@ -523,7 +545,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
     case 'light':
       root.append(
-        section('Verlichting', [
+        persistentSection('light-main', 'Verlichting', [
           lengthField({
             label: object.kind === 'string' ? 'Ophanghoogte' : 'Hoogte',
             value: object.height,
@@ -619,7 +641,7 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
     case 'person':
       root.append(
-        section('Referentiepersoon', [
+        persistentSection('person-main', 'Referentiepersoon', [
           lengthField({
             label: 'Lengte',
             value: object.height,
@@ -649,11 +671,16 @@ export function renderInspector(host: InspectorHost): HTMLElement {
       break;
     case 'measure':
       root.append(
-        section('Maat', [
+        persistentSection('measure-main', 'Maat', [
           note(
-            object.path.length >= 2
-              ? `Afstand: ${formatShort(distance(object.path[0], object.path[1]))}`
-              : 'Sleep de punten om te meten',
+            object.path.length > 2
+              ? `${object.path.length - 1} stukken · totaal ${formatShort(perimeter(object.path, false))}`
+              : object.path.length === 2
+                ? `Afstand: ${formatShort(distance(object.path[0], object.path[1]))}`
+                : 'Sleep de punten om te meten',
+          ),
+          note(
+            'Sleep de gele bolletjes om te verplaatsen, klik een groen ruitje op een stuk om er een punt aan toe te voegen — handig als meetlat om iets uit te zetten.',
           ),
           toggle({
             label: 'Tonen op de plattegrond',
@@ -684,7 +711,7 @@ function surfaceSections(
   const sections: HTMLElement[] = [];
 
   sections.push(
-    section('Vlak', [
+    persistentSection('surface-main', 'Vlak', [
       select({
         label: 'Materiaal',
         value: object.ground.kind,
@@ -797,7 +824,7 @@ function surfaceSections(
   /* --------------------------------------------------------- retaining wall */
   const edgeCount = object.points.length;
   sections.push(
-    section('Randmuur (stapelblokken)', [
+    persistentSection('surface-edging', 'Randmuur (stapelblokken)', [
       toggle({
         label: 'Muur rondom dit vlak',
         value: object.edging.enabled,
@@ -895,7 +922,7 @@ function structureSections(
     });
 
   const sections: HTMLElement[] = [
-    section('Afmetingen', [
+    persistentSection('structure-dimensions', 'Afmetingen', [
       row(
         [
           lengthField({
@@ -950,7 +977,7 @@ function structureSections(
 
   if (object.kind !== 'raised-planter') {
     sections.push(
-      section('Dak', [
+      persistentSection('structure-roof', 'Dak', [
         select({
           label: 'Daktype',
           value: object.roof,
@@ -1003,7 +1030,7 @@ function structureSections(
             )
           : null,
       ]),
-      section('Deur en raam', [
+      persistentSection('structure-door-window', 'Deur en raam', [
         toggle({
           label: 'Deur',
           value: object.door,
@@ -1135,7 +1162,8 @@ export function blockSection(
   apply: Mutator<BlockSpec>,
 ): HTMLElement {
   const unit = host.store.doc.view.unit;
-  return section(
+  return persistentSection(
+    `block:${spec.id}`,
     `${title} — ${spec.name}`,
     [
       textField({
@@ -1247,7 +1275,8 @@ export function tileSection(
   apply: Mutator<TileSpec>,
 ): HTMLElement {
   const unit = host.store.doc.view.unit;
-  return section(
+  return persistentSection(
+    `tile:${spec.id}`,
     `${title} — ${spec.name}`,
     [
       textField({
@@ -1363,9 +1392,9 @@ export function tileSection(
 }
 
 function takeOffSection(lines: string[]): HTMLElement {
-  return section(
+  return persistentSection(
+    'takeoff',
     'Materiaal',
     lines.map((line) => note(line)),
-    { collapsed: false },
   );
 }
