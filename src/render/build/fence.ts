@@ -75,10 +75,14 @@ function addBay(
   angle: number,
   dir: { x: number; z: number },
 ) {
+  // boxMatrix's width/depth (x/z) scale axes rotate with `angle` such that
+  // depth ends up running along `dir`; width ends up across it. Fence spans
+  // run along `dir`, so the span goes in the depth slot and the physical
+  // thickness goes in the width slot.
   const thickness = 0.018;
   switch (object.style) {
     case 'panel':
-      out.push(boxMatrix(cx, 0.05, cz, width, height - 0.05, thickness * 2, angle));
+      out.push(boxMatrix(cx, 0.05, cz, thickness * 2, height - 0.05, width, angle));
       break;
 
     case 'slat': {
@@ -88,7 +92,7 @@ function addBay(
       const pitch = slatHeight + gap;
       const count = Math.max(1, Math.floor((height - 0.04) / pitch));
       for (let i = 0; i < count; i++) {
-        out.push(boxMatrix(cx, 0.04 + i * pitch, cz, width, slatHeight, thickness * 1.6, angle));
+        out.push(boxMatrix(cx, 0.04 + i * pitch, cz, thickness * 1.6, slatHeight, width, angle));
       }
       break;
     }
@@ -108,15 +112,15 @@ function addBay(
             cx + dir.x * offset,
             0.06,
             cz + dir.z * offset,
-            picketWidth,
-            height - 0.06,
             thickness * 1.6,
+            height - 0.06,
+            picketWidth,
             angle,
           ),
         );
       }
-      out.push(boxMatrix(cx, height * 0.28, cz, width, 0.06, thickness, angle));
-      out.push(boxMatrix(cx, height * 0.78, cz, width, 0.06, thickness, angle));
+      out.push(boxMatrix(cx, height * 0.28, cz, thickness, 0.06, width, angle));
+      out.push(boxMatrix(cx, height * 0.78, cz, thickness, 0.06, width, angle));
       break;
     }
 
@@ -132,15 +136,15 @@ function addBay(
             cx + dir.x * offset,
             0,
             cz + dir.z * offset,
-            0.022,
-            height,
             thickness,
+            height,
+            0.022,
             angle,
           ),
         );
       }
       for (let r = 0; r <= rows; r++) {
-        out.push(boxMatrix(cx, (r * height) / rows, cz, width, 0.022, thickness * 0.8, angle));
+        out.push(boxMatrix(cx, (r * height) / rows, cz, thickness * 0.8, 0.022, width, angle));
       }
       break;
     }
@@ -148,7 +152,7 @@ function addBay(
     case 'wire': {
       const strands = Math.max(2, Math.round(height / 0.25));
       for (let s = 1; s <= strands; s++) {
-        out.push(boxMatrix(cx, (s * height) / strands, cz, width, 0.008, 0.008, angle));
+        out.push(boxMatrix(cx, (s * height) / strands, cz, 0.008, 0.008, width, angle));
       }
       break;
     }
