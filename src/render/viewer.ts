@@ -17,6 +17,7 @@ import { buildObject } from './build';
 import type { BuildContext } from './build/context';
 import { CameraRig, type CameraMode } from './cameras';
 import { Overlays } from './overlays';
+import { PathTracer, type RaytraceLighting } from './raytrace/PathTracer';
 import { SkySystem, type SunState } from './sky';
 
 export interface PickResult {
@@ -44,6 +45,13 @@ export class Viewer {
 
   private composer: EffectComposer;
   private outline: OutlinePass;
+  private pathTracer: PathTracer | null = null;
+  /** Set whenever the built scene graph changes; the path tracer's triangle
+   *  soup is only rebuilt from it lazily, right before it's next needed. */
+  private raytraceDirty = true;
+  /** True while a ray-traced photo export is resizing the shared renderer —
+   *  the normal frame loop sits out so it doesn't render at the wrong size. */
+  private exporting = false;
   private raycaster = new THREE.Raycaster();
   private clock = new THREE.Clock();
   private frame = 0;
@@ -149,6 +157,7 @@ export class Viewer {
 
     this.overlays.sync(this.sun);
     this.refreshOutline();
+    this.raytraceDirty = true;
   }
 
   rebuildAll() {
@@ -251,6 +260,29 @@ export class Viewer {
     if (!box.isEmpty()) this.rig.frame(box);
   }
 
+  /* ------------------------------------------------------------ raytrace */
+
+  private ensurePathTracer(): PathTracer {
+    if (!this.pathTracer) {
+      this.pathTracer = new PathTracer(this.renderer);
+      const rect = this.container.getBoundingClientRect();
+      this.pathTracer.setSize(Math.max(1, Math.floor(rect.width)), Math.max(1, Math.floor(rect.height)));
+      this.raytraceDirty = true;
+    }
+    return this.pathTracer;
+  }
+
+  private lighting(): RaytraceLighting {
+    return {
+      sun: this.sun,
+      sunColor: this.sky.sunColor,
+      sunIntensity: this.sky.sun.intensity,
+      sunVisible: this.sky.sunVisible,
+      skyTop: this.sky.skyTop,
+      skyBottom: this.sky.skyBottom,
+    };
+  }
+
   /* ----------------------------------------------------------------- loop */
 
   addFrameCallback(callback: () => void) {
@@ -265,6 +297,7 @@ export class Viewer {
     this.composer.setSize(width, height);
     this.outline.setSize(width, height);
     this.rig.setAspect(width / height);
+    this.pathTracer?.setSize(width, height);
   }
 
   private loop = () => {
@@ -286,7 +319,19 @@ export class Viewer {
     this.rig.update(delta);
     for (const callback of this.onBeforeRender) callback();
 
-    this.composer.render();
+    if (this.exporting) {
+      // A photo export owns the renderer's size for the moment; skip this
+      // frame rather than render at the export's resolution on screen.
+    } else if (this.store.doc.view.renderEngine === 'raytrace') {
+      const tracer = this.ensurePathTracer();
+      if (this.raytraceDirty) {
+        tracer.updateGeometry(this.world);
+        this.raytraceDirty = false;
+      }
+      tracer.render(this.rig.camera, this.lighting());
+    } else {
+      this.composer.render();
+    }
   };
 
   /** Recomputes lighting after the environment settings change. */
@@ -299,27 +344,72 @@ export class Viewer {
 
   /** Renders one frame off-screen at a given size and returns a PNG blob. */
   async snapshot(width: number, height: number): Promise<Blob | null> {
+    if (this.store.doc.view.renderEngine === 'raytrace') {
+      return this.snapshotRaytraced(width, height);
+    }
+
     const previous = new THREE.Vector2();
     this.renderer.getSize(previous);
     const ratio = this.renderer.getPixelRatio();
 
-    this.renderer.setPixelRatio(1);
-    this.renderer.setSize(width, height, false);
-    this.rig.setAspect(width / height);
-    this.composer.setSize(width, height);
-    this.outline.setSize(width, height);
-    this.composer.render();
+    this.exporting = true;
+    try {
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(width, height, false);
+      this.rig.setAspect(width / height);
+      this.composer.setSize(width, height);
+      this.outline.setSize(width, height);
+      this.composer.render();
 
-    const blob = await new Promise<Blob | null>((resolve) =>
-      this.renderer.domElement.toBlob(resolve, 'image/png'),
-    );
+      const blob = await new Promise<Blob | null>((resolve) =>
+        this.renderer.domElement.toBlob(resolve, 'image/png'),
+      );
+      return blob;
+    } finally {
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(previous.x, previous.y, false);
+      this.rig.setAspect(previous.x / previous.y);
+      this.composer.setSize(previous.x, previous.y);
+      this.outline.setSize(previous.x, previous.y);
+      this.exporting = false;
+    }
+  }
 
-    this.renderer.setPixelRatio(ratio);
-    this.renderer.setSize(previous.x, previous.y, false);
-    this.rig.setAspect(previous.x / previous.y);
-    this.composer.setSize(previous.x, previous.y);
-    this.outline.setSize(previous.x, previous.y);
-    return blob;
+  /** Number of accumulated samples for a ray-traced photo export — enough to
+   *  mostly clear the noise floor without stalling the tab for too long. */
+  private static readonly EXPORT_SAMPLES = 48;
+
+  private async snapshotRaytraced(width: number, height: number): Promise<Blob | null> {
+    const previous = new THREE.Vector2();
+    this.renderer.getSize(previous);
+    const ratio = this.renderer.getPixelRatio();
+    const previousAspect = this.rig.camera.aspect;
+    const tracer = this.ensurePathTracer();
+
+    this.exporting = true;
+    try {
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(width, height, false);
+      this.rig.setAspect(width / height);
+
+      tracer.setSize(width, height);
+      if (this.raytraceDirty) {
+        tracer.updateGeometry(this.world);
+        this.raytraceDirty = false;
+      }
+      await tracer.renderSamples(Viewer.EXPORT_SAMPLES, this.rig.camera, this.lighting());
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        this.renderer.domElement.toBlob(resolve, 'image/png'),
+      );
+      return blob;
+    } finally {
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(previous.x, previous.y, false);
+      this.rig.setAspect(previousAspect);
+      tracer.setSize(previous.x, previous.y);
+      this.exporting = false;
+    }
   }
 
   dispose() {
@@ -330,6 +420,7 @@ export class Viewer {
     this.sky.dispose();
     this.overlays.dispose();
     this.composer.dispose();
+    this.pathTracer?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

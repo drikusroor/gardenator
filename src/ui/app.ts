@@ -224,6 +224,24 @@ export class App {
       group([
         button({
           label: '',
+          icon: ICONS.square,
+          title: 'Rasterweergave — snel en interactief',
+          active: view.renderEngine === 'raster',
+          onClick: () => this.setRenderEngine('raster'),
+        }),
+        button({
+          label: '',
+          icon: ICONS.prism,
+          title:
+            'Ray tracing (bèta) — zachte schaduwen en licht dat echt terugkaatst; scherpt aan zodra de camera stilstaat. Wordt ook gebruikt voor de foto-export.',
+          active: view.renderEngine === 'raytrace',
+          onClick: () => this.setRenderEngine('raytrace'),
+        }),
+      ]),
+
+      group([
+        button({
+          label: '',
           icon: ICONS.grid,
           title: 'Bovenaanzicht',
           onClick: () => this.preset('top'),
@@ -389,6 +407,15 @@ export class App {
         : mode === 'fly'
           ? 'WASD om te vliegen, Q/E omlaag en omhoog. Houd de linker- of rechtermuisknop ingedrukt en sleep om rond te kijken.'
           : 'WASD om te lopen. Houd de linker- of rechtermuisknop ingedrukt en sleep om rond te kijken. Ooghoogte staat in het paneel Omgeving.',
+    );
+  }
+
+  private setRenderEngine(mode: 'raster' | 'raytrace') {
+    this.store.update((doc) => void (doc.view.renderEngine = mode));
+    this.setStatus(
+      mode === 'raytrace'
+        ? 'Ray tracing (bèta): het beeld scherpt geleidelijk aan zodra de camera stilstaat. De knop Foto gebruikt hem ook.'
+        : 'Rasterweergave — snel en interactief.',
     );
   }
 
@@ -698,8 +725,15 @@ export class App {
   }
 
   private async exportImage() {
+    const raytraced = this.store.doc.view.renderEngine === 'raytrace';
+    if (raytraced) {
+      this.setStatus('Foto wordt ray traced — dit kan even duren…');
+      // Let the status message paint before the render loop blocks the tab.
+      await new Promise(requestAnimationFrame);
+    }
     const blob = await this.viewer.snapshot(2400, 1500);
     if (blob) downloadBlob(blob, `${slug(this.store.doc.name)}-aanzicht.png`);
+    if (raytraced) this.setStatus('Foto opgeslagen.');
   }
 
   /* ---------------------------------------------------------------- chrome */

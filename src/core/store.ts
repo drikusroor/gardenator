@@ -52,6 +52,7 @@ export function emptyDoc(name = 'Mijn tuin'): GardenDoc {
       showGrass: true,
       unit: 'cm',
       quality: 'high',
+      renderEngine: 'raster',
     },
     templates: { blocks: defaultBlocks(), tiles: defaultTiles() },
     objects: [],

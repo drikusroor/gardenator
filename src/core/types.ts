@@ -337,6 +337,14 @@ export interface ViewSettings {
   showGrass: boolean;
   unit: 'm' | 'cm';
   quality: 'low' | 'medium' | 'high';
+  /**
+   * 'raster' is the normal live WebGL view. 'raytrace' switches the viewport
+   * (and the "Foto" export) to the progressive GPU path tracer for real soft
+   * shadows and bounced light — it converges while the camera sits still and
+   * resets on every move, so it trades interactivity for a more photoreal
+   * look. Not meant to stay on while editing.
+   */
+  renderEngine: 'raster' | 'raytrace';
 }
 
 export interface TemplateLibrary {

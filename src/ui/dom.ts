@@ -139,4 +139,7 @@ export const ICONS = {
   home: icon('<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'),
   person: icon('<circle cx="12" cy="6" r="3"/><path d="M6 21v-3a6 6 0 0 1 12 0v3"/>'),
   grid: icon('<path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>'),
+  prism: icon(
+    '<path d="M12 3l9 16H3z"/><path d="M12 3v16M12 3l-4.5 8M12 3l4.5 8M7.5 11l-4.5 8h9zM16.5 11l4.5 8h-9z"/>',
+  ),
 };

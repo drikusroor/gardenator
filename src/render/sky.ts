@@ -200,6 +200,24 @@ export class SkySystem {
     return this.state;
   }
 
+  /** Direct sunlight colour, unscaled by intensity — matches the dome's sun disc. */
+  get sunColor(): THREE.Color {
+    return this.uniforms.uSunColor.value as THREE.Color;
+  }
+
+  /** 0..1 fade used to hide the sun disc/halo around sunrise and sunset. */
+  get sunVisible(): number {
+    return this.uniforms.uSunVisible.value as number;
+  }
+
+  get skyTop(): THREE.Color {
+    return this.uniforms.uTop.value as THREE.Color;
+  }
+
+  get skyBottom(): THREE.Color {
+    return this.uniforms.uBottom.value as THREE.Color;
+  }
+
   /** Recomputes lighting for the current environment. Returns the sun state. */
   update(environment: EnvironmentSettings, site: SiteSettings): SunState {
     const { elevation, azimuth } = solarPosition(
