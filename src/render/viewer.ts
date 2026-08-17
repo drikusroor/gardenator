@@ -280,6 +280,12 @@ export class Viewer {
       sunVisible: this.sky.sunVisible,
       skyTop: this.sky.skyTop,
       skyBottom: this.sky.skyBottom,
+      moonDirection: this.sky.moonDirection,
+      moonColor: this.sky.moonColor,
+      moonIntensity: this.sky.moonIntensity,
+      hemisphereGroundColor: this.sky.hemisphereGroundColor,
+      hemisphereIntensity: this.sky.hemisphereIntensity,
+      ambientIntensity: this.sky.ambientIntensity,
     };
   }
 

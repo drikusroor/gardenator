@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import type { SunState } from '../sky';
-import { buildRaytraceGeometry, NODE_TEXELS, TEXTURE_WIDTH, TRIANGLE_TEXELS } from './sceneData';
+import { buildRaytraceGeometry, LIGHT_TEXELS, NODE_TEXELS, TEXTURE_WIDTH, TRIANGLE_TEXELS } from './sceneData';
 import { FULLSCREEN_VERTEX, PATHTRACE_FRAGMENT, RESOLVE_FRAGMENT } from './shaders';
 
 /** Everything the path tracer needs from `SkySystem` for a frame. */
@@ -25,6 +25,12 @@ export interface RaytraceLighting {
   sunVisible: number;
   skyTop: THREE.Color;
   skyBottom: THREE.Color;
+  moonDirection: THREE.Vector3;
+  moonColor: THREE.Color;
+  moonIntensity: number;
+  hemisphereGroundColor: THREE.Color;
+  hemisphereIntensity: number;
+  ambientIntensity: number;
 }
 
 const MOVE_EPSILON = 1e-5;
@@ -82,6 +88,7 @@ export class PathTracer {
 
   private triangleTexture: THREE.DataTexture;
   private bvhTexture: THREE.DataTexture;
+  private lightTexture: THREE.DataTexture;
 
   private sampleCounter = 0;
   private frameSeed = 0;
@@ -105,6 +112,7 @@ export class PathTracer {
   constructor(private renderer: THREE.WebGLRenderer) {
     this.triangleTexture = placeholderTexture();
     this.bvhTexture = placeholderTexture();
+    this.lightTexture = placeholderTexture();
 
     this.accumTarget = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.FloatType,
@@ -138,7 +146,15 @@ export class PathTracer {
         uSunVisible: { value: 0 },
         uSkyTop: { value: new THREE.Color('#3e7cc4') },
         uSkyBottom: { value: new THREE.Color('#bcd4e6') },
-        uAmbientColor: { value: new THREE.Color('#bcd4e6').multiplyScalar(0.12) },
+        uMoonDirection: { value: new THREE.Vector3(0, 1, 0) },
+        uMoonColor: { value: new THREE.Color('#7f9bd4') },
+        uMoonIntensity: { value: 0 },
+        uHemisphereGroundColor: { value: new THREE.Color('#4a4436') },
+        uHemisphereIntensity: { value: 1 },
+        uAmbientIntensity: { value: 0.12 },
+        tLightTexture: { value: this.lightTexture },
+        uLightTextureSize: { value: new THREE.Vector2(TEXTURE_WIDTH, 1) },
+        uLightCount: { value: 0 },
       },
     });
 
@@ -228,12 +244,30 @@ export class PathTracer {
     this.bvhTexture.generateMipmaps = false;
     this.bvhTexture.needsUpdate = true;
 
+    this.lightTexture.dispose();
+    this.lightTexture = new THREE.DataTexture(
+      geometry.lightData,
+      TEXTURE_WIDTH,
+      geometry.lightTextureHeight,
+      THREE.RGBAFormat,
+      THREE.FloatType,
+    );
+    this.lightTexture.minFilter = THREE.NearestFilter;
+    this.lightTexture.magFilter = THREE.NearestFilter;
+    this.lightTexture.wrapS = THREE.ClampToEdgeWrapping;
+    this.lightTexture.wrapT = THREE.ClampToEdgeWrapping;
+    this.lightTexture.generateMipmaps = false;
+    this.lightTexture.needsUpdate = true;
+
     const u = this.accumulateMaterial.uniforms;
     u.tTriangleTexture.value = this.triangleTexture;
     (u.uTriangleTextureSize.value as THREE.Vector2).set(TEXTURE_WIDTH, geometry.triangleTextureHeight);
     u.tBvhTexture.value = this.bvhTexture;
     (u.uBvhTextureSize.value as THREE.Vector2).set(TEXTURE_WIDTH, geometry.bvhTextureHeight);
     u.uTriangleCount.value = geometry.triangleCount;
+    u.tLightTexture.value = this.lightTexture;
+    (u.uLightTextureSize.value as THREE.Vector2).set(TEXTURE_WIDTH, geometry.lightTextureHeight);
+    u.uLightCount.value = geometry.lightCount;
 
     this.reset();
   }
@@ -247,9 +281,25 @@ export class PathTracer {
     this.renderer.setRenderTarget(previous);
   }
 
-  /** Pushes sun/sky uniforms, resetting accumulation if the lighting moved.
-   *  Returns whether it changed (including the very first call). */
-  private syncEnvironment({ sun, sunColor, sunIntensity, sunVisible, skyTop, skyBottom }: RaytraceLighting): boolean {
+  /** Pushes sun/sky/moon/ambient uniforms, resetting accumulation if the
+   *  lighting moved. Returns whether it changed (including the very first
+   *  call). Moon/hemisphere/ambient aren't included in the change check —
+   *  they're recomputed in the same `SkySystem.update()` tick as sun/sky, so
+   *  they never change without one of those already tripping it. */
+  private syncEnvironment({
+    sun,
+    sunColor,
+    sunIntensity,
+    sunVisible,
+    skyTop,
+    skyBottom,
+    moonDirection,
+    moonColor,
+    moonIntensity,
+    hemisphereGroundColor,
+    hemisphereIntensity,
+    ambientIntensity,
+  }: RaytraceLighting): boolean {
     const changed =
       vectorDiffers(this.lastSunDirection, sun.direction) ||
       colorDiffers(this.lastSunColor, sunColor) ||
@@ -263,7 +313,12 @@ export class PathTracer {
     u.uSunVisible.value = sunVisible;
     (u.uSkyTop.value as THREE.Color).copy(skyTop);
     (u.uSkyBottom.value as THREE.Color).copy(skyBottom);
-    (u.uAmbientColor.value as THREE.Color).copy(skyBottom).multiplyScalar(0.12);
+    (u.uMoonDirection.value as THREE.Vector3).copy(moonDirection);
+    (u.uMoonColor.value as THREE.Color).copy(moonColor);
+    u.uMoonIntensity.value = moonIntensity;
+    (u.uHemisphereGroundColor.value as THREE.Color).copy(hemisphereGroundColor);
+    u.uHemisphereIntensity.value = hemisphereIntensity;
+    u.uAmbientIntensity.value = ambientIntensity;
 
     this.lastSunDirection.copy(sun.direction);
     this.lastSunColor.copy(sunColor);
@@ -277,6 +332,16 @@ export class PathTracer {
 
   /** Returns whether the camera moved (including the very first call). */
   private syncCamera(camera: THREE.PerspectiveCamera): boolean {
+    // The path tracer never renders *with* this camera (only the fullscreen
+    // quad's own `quadCamera`), so nothing else guarantees its matrixWorld
+    // is current — OrbitControls happens to refresh it itself, but the fly
+    // /walk rig just sets position/quaternion and normally relies on the
+    // next `renderer.render(scene, camera)` to propagate that, which never
+    // happens in this render path. Without this, fly/walk look and movement
+    // silently stop affecting the ray-traced view (the raster view is fine
+    // since composer.render() does update it).
+    camera.updateMatrixWorld();
+
     const moved =
       !this.hasPreviousState ||
       matrixDiffers(this.lastCameraMatrix, camera.matrixWorld) ||
@@ -336,6 +401,7 @@ export class PathTracer {
     this.accumTarget.dispose();
     this.triangleTexture.dispose();
     this.bvhTexture.dispose();
+    this.lightTexture.dispose();
     this.accumulateMaterial.dispose();
     this.resolveMaterial.dispose();
     for (const scene of [this.accumulateScene, this.resolveScene]) {
@@ -347,4 +413,4 @@ export class PathTracer {
   }
 }
 
-export { TEXTURE_WIDTH, TRIANGLE_TEXELS, NODE_TEXELS };
+export { TEXTURE_WIDTH, TRIANGLE_TEXELS, NODE_TEXELS, LIGHT_TEXELS };
