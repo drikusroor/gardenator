@@ -21,6 +21,11 @@ import { buildBVH } from './bvh';
 
 export const TRIANGLE_TEXELS = 5;
 export const NODE_TEXELS = 2;
+/** Position+range, then colour×intensity+decay — mirrors three.js's
+ *  physically-correct point/spot light attenuation (see `getDistanceAttenuation`
+ *  in three's `lights_pars_begin.glsl.js`), spot lights simplified to
+ *  omnidirectional since none of the fittings' cones are narrow. */
+export const LIGHT_TEXELS = 2;
 /** Fixed texture width; height grows with scene size. Matches the texel
  *  addressing scheme in `shaders.ts` (`mod`/`floor` against this constant). */
 export const TEXTURE_WIDTH = 2048;
@@ -32,6 +37,9 @@ export interface RaytraceGeometry {
   nodeCount: number;
   bvhData: Float32Array;
   bvhTextureHeight: number;
+  lightCount: number;
+  lightData: Float32Array;
+  lightTextureHeight: number;
 }
 
 const materialLookCache = new WeakMap<THREE.Material, { color: THREE.Color; emissive: THREE.Color }>();
@@ -113,10 +121,13 @@ export function buildRaytraceGeometry(root: THREE.Object3D): RaytraceGeometry {
   root.updateMatrixWorld(true);
 
   const meshes: THREE.Mesh[] = [];
+  const lights: (THREE.PointLight | THREE.SpotLight)[] = [];
   root.traverse((child) => {
-    if (!(child as THREE.Mesh).isMesh) return;
     if (!child.visible) return;
-    meshes.push(child as THREE.Mesh);
+    if ((child as THREE.Mesh).isMesh) meshes.push(child as THREE.Mesh);
+    else if ((child as THREE.PointLight).isPointLight || (child as THREE.SpotLight).isSpotLight) {
+      lights.push(child as THREE.PointLight | THREE.SpotLight);
+    }
   });
 
   let triangleCount = 0;
@@ -220,12 +231,43 @@ export function buildRaytraceGeometry(root: THREE.Object3D): RaytraceGeometry {
   const paddedBvhData = new Float32Array(TEXTURE_WIDTH * bvhTextureHeight * 4);
   paddedBvhData.set(aabb.subarray(0, Math.min(nodeCount * 8, paddedBvhData.length)));
 
+  // Point/spot fittings (post lamps, ground spots, lanterns, festoon bulbs)
+  // — captured separately from their small emissive bulb mesh above, since a
+  // random diffuse bounce has almost no chance of hitting something that
+  // small. Without these as real next-event-estimation lights, night scenes
+  // go nearly black beyond whatever bulb geometry the camera looks straight
+  // at, since the raster view's actual illumination comes from these lights.
+  const scratchLightPos = new THREE.Vector3();
+  const lightData = new Float32Array(Math.max(1, lights.length) * LIGHT_TEXELS * 4);
+  let lightIndex = 0;
+  for (const light of lights) {
+    if (light.intensity <= 0) continue;
+    light.getWorldPosition(scratchLightPos);
+    const l = lightIndex * LIGHT_TEXELS * 4;
+    lightData[l + 0] = scratchLightPos.x;
+    lightData[l + 1] = scratchLightPos.y;
+    lightData[l + 2] = scratchLightPos.z;
+    lightData[l + 3] = light.distance;
+    lightData[l + 4] = light.color.r * light.intensity;
+    lightData[l + 5] = light.color.g * light.intensity;
+    lightData[l + 6] = light.color.b * light.intensity;
+    lightData[l + 7] = light.decay;
+    lightIndex++;
+  }
+  const lightCount = lightIndex;
+  const lightTextureHeight = Math.max(1, Math.ceil((lightCount * LIGHT_TEXELS) / TEXTURE_WIDTH));
+  const paddedLightData = new Float32Array(TEXTURE_WIDTH * lightTextureHeight * 4);
+  paddedLightData.set(lightData.subarray(0, Math.min(lightCount * LIGHT_TEXELS * 4, paddedLightData.length)));
+
   return {
     triangleCount,
     triangleData: paddedTriangleData,
     triangleTextureHeight,
     nodeCount,
     bvhData: paddedBvhData,
+    lightCount,
+    lightData: paddedLightData,
+    lightTextureHeight,
     bvhTextureHeight,
   };
 }

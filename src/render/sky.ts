@@ -317,6 +317,32 @@ export class SkySystem {
     return this.uniforms.uBottom.value as THREE.Color;
   }
 
+  /** Unit vector from the garden towards the moon. */
+  get moonDirection(): THREE.Vector3 {
+    return this.moon.position.clone().normalize();
+  }
+
+  get moonColor(): THREE.Color {
+    return this.moon.color;
+  }
+
+  /** 0 in daylight, ~0.5 at night — mirrors `this.moon.intensity`. */
+  get moonIntensity(): number {
+    return this.moon.intensity;
+  }
+
+  get hemisphereGroundColor(): THREE.Color {
+    return this.hemisphere.groundColor;
+  }
+
+  get hemisphereIntensity(): number {
+    return this.hemisphere.intensity;
+  }
+
+  get ambientIntensity(): number {
+    return this.ambient.intensity;
+  }
+
   /** Advances cloud drift and star twinkle. Cheap enough to call every frame. */
   tick(delta: number) {
     this.elapsed += delta;

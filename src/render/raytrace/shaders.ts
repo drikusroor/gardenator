@@ -36,10 +36,13 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
   #define PI 3.14159265359
   #define ONE_OVER_PI 0.31830988618
   #define INFINITY 1.0e10
-  #define MAX_BOUNCES 4
   #define STACK_SIZE 64
 
   varying vec2 vUv;
+
+  // Lower while the camera is moving so orbit/fly/walk stays responsive —
+  // see PathTracer's render-scale ramp.
+  uniform int uMaxBounces;
 
   uniform sampler2D tTriangleTexture;
   uniform vec2 uTriangleTextureSize;
@@ -59,7 +62,27 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
   uniform float uSunVisible;
   uniform vec3 uSkyTop;
   uniform vec3 uSkyBottom;
-  uniform vec3 uAmbientColor;
+
+  // Dim directional fill standing in for the moon and night skylight —
+  // mirrors the sun's next-event-estimation term below, just weaker.
+  uniform vec3 uMoonDirection;
+  uniform vec3 uMoonColor;
+  uniform float uMoonIntensity;
+
+  // Hemisphere + flat ambient, matching the rasteriser's HemisphereLight and
+  // AmbientLight so a surface's shaded side isn't pitch black between direct
+  // light hits.
+  uniform vec3 uHemisphereGroundColor;
+  uniform float uHemisphereIntensity;
+  uniform float uAmbientIntensity;
+
+  // Point/spot garden fittings (post lamps, ground spots, lanterns, festoon
+  // bulbs) — one is importance-sampled per bounce as a next-event-estimation
+  // light, the same way the sun is, since they're what actually lights a
+  // night scene beyond the sky fill.
+  uniform sampler2D tLightTexture;
+  uniform vec2 uLightTextureSize;
+  uniform int uLightCount;
 
   // ---------------------------------------------------------------- random
 
@@ -197,6 +220,36 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
     return sceneIntersect(rayOrigin, rayDirection, n, c, e) < INFINITY;
   }
 
+  // Point-light shadow test: only occluders strictly between the hit point
+  // and the light, not anything beyond it.
+  bool occludedDistance(vec3 rayOrigin, vec3 rayDirection, float maxDist) {
+    vec3 n, c, e;
+    return sceneIntersect(rayOrigin, rayDirection, n, c, e) < maxDist;
+  }
+
+  void getLight(int index, out vec3 position, out float range, out vec3 colorIntensity, out float decay) {
+    float base = float(index) * 2.0;
+    vec4 l0 = fetchTexel(tLightTexture, base + 0.0, uLightTextureSize);
+    vec4 l1 = fetchTexel(tLightTexture, base + 1.0, uLightTextureSize);
+    position = l0.xyz;
+    range = l0.w;
+    colorIntensity = l1.xyz;
+    decay = l1.w;
+  }
+
+  // Matches three.js's physically-correct point/spot falloff (see
+  // getDistanceAttenuation in lights_pars_begin.glsl.js): inverse-power decay
+  // with a smooth window to zero at range when it is set.
+  float lightAttenuation(float dist, float range, float decay) {
+    float falloff = 1.0 / max(pow(dist, decay), 0.01);
+    if (range > 0.0) {
+      float ratio = clamp(dist / range, 0.0, 1.0);
+      float windowed = clamp(1.0 - ratio * ratio * ratio * ratio, 0.0, 1.0);
+      falloff *= windowed * windowed;
+    }
+    return falloff;
+  }
+
   // ------------------------------------------------------------------ sky
   // Mirrors the rasterised sky dome in src/render/sky.ts so both render
   // modes agree on what the sky looks like.
@@ -223,7 +276,7 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
     vec3 throughput = vec3(1.0);
     vec3 radiance = vec3(0.0);
 
-    for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+    for (int bounce = 0; bounce < uMaxBounces; bounce++) {
       vec3 hitNormal, hitColor, hitEmissive;
       float t = sceneIntersect(rayOrigin, rayDirection, hitNormal, hitColor, hitEmissive);
 
@@ -236,10 +289,13 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
       vec3 normal = dot(hitNormal, rayDirection) < 0.0 ? hitNormal : -hitNormal;
 
       radiance += throughput * hitEmissive;
-      // Cheap ambient fill so single-bounce corners aren't pitch black
-      // between accumulated samples — a coarse stand-in for the skylight
-      // the rasteriser's hemisphere light provides directly.
-      radiance += throughput * hitColor * uAmbientColor;
+
+      // Hemisphere + flat ambient fill, matching the rasteriser's
+      // HemisphereLight/AmbientLight so a surface's shaded side isn't pitch
+      // black between direct light hits — this is what keeps a clear night
+      // sky from reading as solid black even before the lights below.
+      vec3 hemi = mix(uHemisphereGroundColor, uSkyTop, normal.y * 0.5 + 0.5) * uHemisphereIntensity;
+      radiance += throughput * hitColor * (hemi + vec3(uAmbientIntensity));
 
       if (uSunVisible > 0.001) {
         float ndotl = dot(normal, uSunDirection);
@@ -247,6 +303,43 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
           vec3 shadowOrigin = hitPoint + normal * 0.001;
           if (!occluded(shadowOrigin, uSunDirection)) {
             radiance += throughput * hitColor * ONE_OVER_PI * uSunColor * uSunIntensity * uSunVisible * ndotl;
+          }
+        }
+      }
+
+      if (uMoonIntensity > 0.001) {
+        float ndotlMoon = dot(normal, uMoonDirection);
+        if (ndotlMoon > 0.0) {
+          vec3 shadowOriginMoon = hitPoint + normal * 0.001;
+          if (!occluded(shadowOriginMoon, uMoonDirection)) {
+            radiance += throughput * hitColor * ONE_OVER_PI * uMoonColor * uMoonIntensity * ndotlMoon;
+          }
+        }
+      }
+
+      // One garden fitting, importance-sampled per bounce — weighted by
+      // uLightCount to stay an unbiased estimator of "sum over all lights".
+      if (uLightCount > 0) {
+        int lightIndex = min(int(floor(randFloat(rng) * float(uLightCount))), uLightCount - 1);
+        vec3 lightPos; float range; vec3 lightColorIntensity; float decay;
+        getLight(lightIndex, lightPos, range, lightColorIntensity, decay);
+
+        vec3 toLight = lightPos - hitPoint;
+        float lightDist = length(toLight);
+        vec3 lightDir = toLight / max(lightDist, 1e-6);
+        float ndotlPoint = dot(normal, lightDir);
+        if (ndotlPoint > 0.0 && lightDist > 1e-5) {
+          vec3 shadowOriginPt = hitPoint + normal * 0.001;
+          // Each fitting's point light sits inside its own bulb/lens/post-head
+          // mesh (see build/lights.ts), so a shadow ray toward it immediately
+          // self-intersects that housing just short of the light — pull the
+          // cutoff back to ignore hits in that last stretch, matching the
+          // raster view where these lights never cast shadows at all.
+          float shadowMaxDist = max(0.0, lightDist - 0.002 - 0.18);
+          if (shadowMaxDist <= 0.0 || !occludedDistance(shadowOriginPt, lightDir, shadowMaxDist)) {
+            float falloff = lightAttenuation(lightDist, range, decay);
+            radiance +=
+              throughput * hitColor * ONE_OVER_PI * lightColorIntensity * falloff * ndotlPoint * float(uLightCount);
           }
         }
       }
