@@ -330,7 +330,13 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
         float ndotlPoint = dot(normal, lightDir);
         if (ndotlPoint > 0.0 && lightDist > 1e-5) {
           vec3 shadowOriginPt = hitPoint + normal * 0.001;
-          if (!occludedDistance(shadowOriginPt, lightDir, lightDist - 0.002)) {
+          // Each fitting's point light sits inside its own bulb/lens/post-head
+          // mesh (see build/lights.ts), so a shadow ray toward it immediately
+          // self-intersects that housing just short of the light — pull the
+          // cutoff back to ignore hits in that last stretch, matching the
+          // raster view where these lights never cast shadows at all.
+          float shadowMaxDist = max(0.0, lightDist - 0.002 - 0.18);
+          if (shadowMaxDist <= 0.0 || !occludedDistance(shadowOriginPt, lightDir, shadowMaxDist)) {
             float falloff = lightAttenuation(lightDist, range, decay);
             radiance +=
               throughput * hitColor * ONE_OVER_PI * lightColorIntensity * falloff * ndotlPoint * float(uLightCount);
