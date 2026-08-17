@@ -72,7 +72,9 @@ function bearingToScene(bearingDeg: number, northOffset: number, elevationDeg: n
 /** Colour stops for direct sunlight, keyed by elevation in degrees. */
 const SUN_COLORS: { at: number; color: string; intensity: number }[] = [
   { at: -6, color: '#2b3a5c', intensity: 0.0 },
+  { at: -2, color: '#7a3b57', intensity: 0.04 },
   { at: 0, color: '#ff7a3d', intensity: 0.35 },
+  { at: 2, color: '#ff9152', intensity: 0.75 },
   { at: 4, color: '#ff9d52', intensity: 1.0 },
   { at: 10, color: '#ffc078', intensity: 1.9 },
   { at: 20, color: '#ffdcae', intensity: 2.6 },
@@ -80,11 +82,15 @@ const SUN_COLORS: { at: number; color: string; intensity: number }[] = [
   { at: 90, color: '#fffaf0', intensity: 3.3 },
 ];
 
-/** Sky zenith / horizon colours through the day. */
+/** Sky zenith / horizon colours through the day. Extra stops either side of the
+ * horizon give sunrise and sunset a proper "blue hour" and "golden hour" band
+ * to pass through, instead of jumping straight from night-blue to day-blue. */
 const SKY_COLORS: { at: number; top: string; bottom: string }[] = [
   { at: -18, top: '#070b16', bottom: '#0d1424' },
   { at: -6, top: '#101a33', bottom: '#2b2f4d' },
+  { at: -3, top: '#182449', bottom: '#5a3a54' },
   { at: -1, top: '#26365e', bottom: '#7d5a6b' },
+  { at: 1, top: '#35507f', bottom: '#f0895f' },
   { at: 3, top: '#3f6191', bottom: '#e0885c' },
   { at: 10, top: '#4f83bd', bottom: '#c9c1a8' },
   { at: 30, top: '#3e7cc4', bottom: '#bcd4e6' },
@@ -117,7 +123,61 @@ const SKY_FRAGMENT = /* glsl */ `
   uniform vec3 uSunDirection;
   uniform vec3 uSunColor;
   uniform float uSunVisible;
+  uniform float uTime;
+  uniform float uCloudiness;
+  uniform vec3 uCloudLit;
+  uniform vec3 uCloudShadow;
+  uniform float uHorizonStrength;
+  uniform float uNightVisible;
+  uniform vec3 uMoonDirection;
   varying vec3 vWorld;
+
+  float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  float hash13(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+  }
+
+  float valueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+  }
+
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 4; i++) {
+      v += amp * valueNoise(p);
+      p *= 2.05;
+      amp *= 0.55;
+    }
+    return v;
+  }
+
+  // Sparse pseudo-random points on the dome, quantised per direction cell.
+  float stars(vec3 dir) {
+    vec3 p = dir * 190.0;
+    vec3 cell = floor(p);
+    vec3 f = fract(p) - 0.5;
+    float h = hash13(cell);
+    vec3 jitter = vec3(hash13(cell + 1.7), hash13(cell + 8.3), hash13(cell + 4.1)) - 0.5;
+    float d = length(f - jitter * 0.7);
+    float dot_ = smoothstep(0.06, 0.0, d) * step(0.985, h);
+    float twinkle = 0.55 + 0.45 * sin(uTime * 2.4 + h * 60.0);
+    return dot_ * twinkle;
+  }
 
   void main() {
     vec3 dir = normalize(vWorld);
@@ -125,11 +185,42 @@ const SKY_FRAGMENT = /* glsl */ `
     float h = clamp(dir.y * 1.15 + 0.08, 0.0, 1.0);
     vec3 sky = mix(uBottom, uTop, pow(h, 0.55));
 
-    // The sun's disc plus the halo around it.
+    // Atmospheric glow that hugs the horizon around sunrise/sunset, visible
+    // even away from the sun itself, the way real skies wash pink all round.
+    float band = exp(-abs(dir.y) * 5.0);
+    sky += uSunColor * band * uHorizonStrength;
+
+    // Clouds live on an imaginary flat layer above the garden: project the
+    // view ray onto it so cloud shapes stretch near the horizon like real
+    // ones do, and drift them slowly over time.
+    float ch = max(dir.y, 0.05);
+    vec2 cloudUv = dir.xz / ch * 0.07 + uTime * vec2(0.012, 0.005);
+    float n = fbm(cloudUv);
+    float edge = mix(0.86, 0.16, clamp(uCloudiness, 0.0, 1.0));
+    float coverage = smoothstep(edge, edge + 0.22, n) * smoothstep(0.02, 0.15, uCloudiness);
+    float verticalFade = smoothstep(-0.05, 0.15, dir.y) * (1.0 - smoothstep(0.7, 1.0, dir.y) * 0.5);
+    float cloudAlpha = coverage * verticalFade;
+
+    float sunFacing = clamp(dot(dir, normalize(uSunDirection)) * 0.5 + 0.5, 0.0, 1.0);
+    vec3 cloudColor = mix(uCloudShadow, uCloudLit, pow(sunFacing, 1.4));
+    cloudColor = mix(cloudColor, uSunColor, uHorizonStrength * 0.35 * verticalFade);
+    sky = mix(sky, cloudColor, cloudAlpha);
+
+    // Stars and moon show through gaps in the cloud, not underneath them.
+    float clearPatch = 1.0 - cloudAlpha;
+    sky += vec3(0.9, 0.93, 1.0) * stars(dir) * uNightVisible * clearPatch;
+
+    float moonCos = dot(dir, normalize(uMoonDirection));
+    float moonDisc = smoothstep(0.9985, 0.9995, moonCos);
+    float moonHalo = pow(max(moonCos, 0.0), 300.0) * 0.5 + pow(max(moonCos, 0.0), 20.0) * 0.08;
+    sky += vec3(0.85, 0.88, 1.0) * (moonDisc * 1.6 + moonHalo) * uNightVisible * clearPatch;
+
+    // The sun's disc plus the halo around it, dimmed where cloud covers it.
     float cosAngle = dot(dir, normalize(uSunDirection));
     float disc = smoothstep(0.9994, 0.9997, cosAngle);
     float halo = pow(max(cosAngle, 0.0), 220.0) * 0.55 + pow(max(cosAngle, 0.0), 12.0) * 0.14;
-    sky += uSunColor * (disc * 2.2 + halo) * uSunVisible;
+    float obscure = clamp(coverage * 1.3, 0.0, 0.9);
+    sky += uSunColor * (disc * 2.2 + halo) * uSunVisible * (1.0 - obscure);
 
     gl_FragColor = vec4(sky, 1.0);
   }
@@ -143,6 +234,7 @@ export class SkySystem {
   readonly dome: THREE.Mesh;
   private uniforms: Record<string, THREE.IUniform>;
   private state: SunState;
+  private elapsed = 0;
 
   constructor(private scene: THREE.Scene) {
     this.sun = new THREE.DirectionalLight('#fff2dc', 3);
@@ -170,6 +262,13 @@ export class SkySystem {
       uSunDirection: { value: new THREE.Vector3(0, 1, 0) },
       uSunColor: { value: new THREE.Color('#fff2dc') },
       uSunVisible: { value: 1 },
+      uTime: { value: 0 },
+      uCloudiness: { value: 0 },
+      uCloudLit: { value: new THREE.Color('#f4f2ee') },
+      uCloudShadow: { value: new THREE.Color('#5c6472') },
+      uHorizonStrength: { value: 0 },
+      uNightVisible: { value: 0 },
+      uMoonDirection: { value: new THREE.Vector3(0, 1, 0) },
     };
     this.dome = new THREE.Mesh(
       new THREE.SphereGeometry(500, 32, 16),
@@ -216,6 +315,12 @@ export class SkySystem {
 
   get skyBottom(): THREE.Color {
     return this.uniforms.uBottom.value as THREE.Color;
+  }
+
+  /** Advances cloud drift and star twinkle. Cheap enough to call every frame. */
+  tick(delta: number) {
+    this.elapsed += delta;
+    this.uniforms.uTime.value = this.elapsed;
   }
 
   /** Recomputes lighting for the current environment. Returns the sun state. */
@@ -266,6 +371,30 @@ export class SkySystem {
     (this.uniforms.uSunDirection.value as THREE.Vector3).copy(direction);
     (this.uniforms.uSunColor.value as THREE.Color).copy(sunColor);
     this.uniforms.uSunVisible.value = clamp01((elevation + 2) / 3) * (1 - environment.cloudiness * 0.8);
+
+    // Cloud layer: lit side leans towards the sun colour, shadowed side
+    // towards the ambient sky; both flatten towards grey as it gets overcast.
+    const cloudLit = new THREE.Color('#f4f2ee').lerp(sunColor, 0.22);
+    const cloudShadow = new THREE.Color('#5c6472').lerp(bottom, 0.35);
+    if (night) {
+      cloudLit.lerp(new THREE.Color('#232a3d'), 0.8);
+      cloudShadow.lerp(new THREE.Color('#12151f'), 0.85);
+    }
+    cloudLit.lerp(overcast, environment.cloudiness * 0.5);
+    cloudShadow.lerp(overcast.clone().multiplyScalar(0.6), environment.cloudiness * 0.5);
+    (this.uniforms.uCloudLit.value as THREE.Color).copy(cloudLit);
+    (this.uniforms.uCloudShadow.value as THREE.Color).copy(cloudShadow);
+    this.uniforms.uCloudiness.value = environment.cloudiness;
+
+    // A golden/rose glow that peaks right around sunrise and sunset and
+    // fades at midday and deep night, dulled a little when it's overcast.
+    const horizonBump = clamp01(1 - Math.abs(elevation - 2) / 10);
+    this.uniforms.uHorizonStrength.value = horizonBump * horizonBump * (1 - environment.cloudiness * 0.7);
+
+    // Stars and the moon disc fade in through nautical twilight and fade
+    // back out under heavy cloud.
+    this.uniforms.uNightVisible.value = clamp01((-elevation - 2) / 14) * (1 - environment.cloudiness * 0.85);
+    (this.uniforms.uMoonDirection.value as THREE.Vector3).copy(direction).multiplyScalar(-1);
 
     // Skylight does most of the work on vertical surfaces outdoors: without a
     // strong hemisphere term every north-facing fence and wall crushes to

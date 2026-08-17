@@ -305,6 +305,8 @@ export class Viewer {
     this.frame = requestAnimationFrame(this.loop);
     const delta = Math.min(0.1, this.clock.getDelta());
 
+    this.sky.tick(delta);
+
     const environment = this.store.doc.environment;
     if (environment.playing) {
       environment.timeMinutes = (environment.timeMinutes + environment.speed * delta) % 1440;
