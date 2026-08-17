@@ -140,6 +140,16 @@ night with the festoon lights lit.
 - **Foto** saves the current 3D view as a 2400×1500 PNG. Switch to the
   isometric preset first for a drawing-style overview with the dimension
   labels on it.
+- The square/prism buttons next to the camera modes switch between the
+  normal WebGL view and **ray tracing (bèta)** — a GPU path tracer with real
+  soft shadows and bounced light, built for this app rather than vendored
+  from a library (see `src/render/raytrace/`). It converges over a second or
+  two once the camera stops moving, and resets on every orbit/pan/zoom, so
+  it is meant for looking and for **Foto** (which renders it at a higher,
+  fixed sample count) rather than for editing. Materials are flattened to a
+  colour + emissive per triangle, so it is not pixel-for-pixel identical to
+  the rasterised view — texture detail and true reflections/refraction
+  (glass, water) are not modelled.
 
 ## How it is put together
 
@@ -200,3 +210,9 @@ next step is a worker, not wasm.
   L-shaped or C-shaped lawn (the sample garden does this).
 - Terrain is flat. Height differences are modelled as raised surfaces, not as
   slopes.
+- Ray tracing mode gives every triangle a flat diffuse colour (sampled from
+  its rasterised texture) plus emissive for lit bulbs — no texture detail,
+  metal/glass reflection or refraction, and alpha-cutout foliage/grass
+  billboards render as solid shapes instead of cut-out leaves. It also
+  rebuilds its whole triangle+BVH buffer from the scene on every edit while
+  active, which is fine for a static "look" but not for fast iteration.
