@@ -30,6 +30,20 @@ export interface RaytraceLighting {
 const MOVE_EPSILON = 1e-5;
 const COLOR_EPSILON = 1e-4;
 
+/** Internal render resolution while the camera/scene is actively changing,
+ *  as a fraction of the real output size — full per-pixel path tracing at
+ *  full resolution is too slow to track a mouse drag frame-by-frame, so a
+ *  moving frame renders small and blurry (upscaled by the resolve pass'
+ *  texture filtering) rather than looking frozen. */
+const MOVING_SCALE = 0.4;
+const FULL_SCALE = 1;
+/** How much the render scale climbs back towards full each still frame
+ *  once movement stops, so the sharpen-up is a quick ramp rather than one
+ *  big jump. */
+const SCALE_RECOVERY_STEP = 0.3;
+const MOVING_BOUNCES = 2;
+const FULL_BOUNCES = 4;
+
 function matrixDiffers(a: THREE.Matrix4, b: THREE.Matrix4): boolean {
   const ae = a.elements;
   const be = b.elements;
@@ -72,6 +86,12 @@ export class PathTracer {
   private sampleCounter = 0;
   private frameSeed = 0;
 
+  /** Real output size in pixels, as passed to `setSize`. */
+  private baseWidth = 1;
+  private baseHeight = 1;
+  /** Current internal render resolution as a fraction of base size. */
+  private renderScale = FULL_SCALE;
+
   /** True once `lastCameraMatrix`/`lastSun*` hold a real previous value —
    *  NaN sentinels don't work here since any NaN comparison is false, which
    *  would silently skip the reset a first render needs. */
@@ -111,6 +131,7 @@ export class PathTracer {
         uCameraAspect: { value: 1 },
         uResolution: { value: new THREE.Vector2(1, 1) },
         uFrameCounter: { value: 0 },
+        uMaxBounces: { value: FULL_BOUNCES },
         uSunDirection: { value: new THREE.Vector3(0, 1, 0) },
         uSunColor: { value: new THREE.Color('#fff2dc') },
         uSunIntensity: { value: 0 },
@@ -143,9 +164,32 @@ export class PathTracer {
   }
 
   setSize(width: number, height: number) {
-    this.accumTarget.setSize(Math.max(1, width), Math.max(1, height));
+    this.baseWidth = Math.max(1, width);
+    this.baseHeight = Math.max(1, height);
+    this.renderScale = FULL_SCALE;
+    this.resizeAccumTarget();
+  }
+
+  /** Resizes the accumulation target to the current base size × render
+   *  scale. Always implies a reset — a resolution change can't reuse
+   *  previously accumulated samples. */
+  private resizeAccumTarget() {
+    const width = Math.max(1, Math.round(this.baseWidth * this.renderScale));
+    const height = Math.max(1, Math.round(this.baseHeight * this.renderScale));
+    this.accumTarget.setSize(width, height);
     (this.accumulateMaterial.uniforms.uResolution.value as THREE.Vector2).set(width, height);
     this.reset();
+  }
+
+  /** Drops to a small, cheap render while the camera/scene is changing so a
+   *  drag stays visibly responsive, then climbs back to full resolution
+   *  over a few still frames once it stops. */
+  private updateRenderScale(moving: boolean) {
+    const target = moving ? MOVING_SCALE : FULL_SCALE;
+    const next = moving ? target : Math.min(target, this.renderScale + SCALE_RECOVERY_STEP);
+    if (Math.abs(next - this.renderScale) < 1e-3) return;
+    this.renderScale = next;
+    this.resizeAccumTarget();
   }
 
   /** Rebuilds the triangle + BVH textures from the current scene graph. Call
@@ -203,8 +247,9 @@ export class PathTracer {
     this.renderer.setRenderTarget(previous);
   }
 
-  /** Pushes sun/sky uniforms, resetting accumulation if the lighting moved. */
-  private syncEnvironment({ sun, sunColor, sunIntensity, sunVisible, skyTop, skyBottom }: RaytraceLighting) {
+  /** Pushes sun/sky uniforms, resetting accumulation if the lighting moved.
+   *  Returns whether it changed (including the very first call). */
+  private syncEnvironment({ sun, sunColor, sunIntensity, sunVisible, skyTop, skyBottom }: RaytraceLighting): boolean {
     const changed =
       vectorDiffers(this.lastSunDirection, sun.direction) ||
       colorDiffers(this.lastSunColor, sunColor) ||
@@ -225,10 +270,13 @@ export class PathTracer {
     this.lastSkyTop.copy(skyTop);
     this.lastSkyBottom.copy(skyBottom);
 
-    if (changed || !this.hasPreviousState) this.reset();
+    const first = !this.hasPreviousState;
+    if (changed || first) this.reset();
+    return changed || first;
   }
 
-  private syncCamera(camera: THREE.PerspectiveCamera) {
+  /** Returns whether the camera moved (including the very first call). */
+  private syncCamera(camera: THREE.PerspectiveCamera): boolean {
     const moved =
       !this.hasPreviousState ||
       matrixDiffers(this.lastCameraMatrix, camera.matrixWorld) ||
@@ -240,13 +288,24 @@ export class PathTracer {
     (u.uCameraMatrix.value as THREE.Matrix4).copy(camera.matrixWorld);
     u.uCameraFovScale.value = Math.tan((camera.fov * Math.PI) / 360);
     u.uCameraAspect.value = camera.aspect;
+    return moved;
   }
 
-  /** Accumulates one more sample and resolves it to the canvas. */
-  render(camera: THREE.PerspectiveCamera, lighting: RaytraceLighting) {
-    this.syncCamera(camera);
-    this.syncEnvironment(lighting);
+  /** Accumulates one more sample and resolves it to the canvas.
+   *
+   *  `interactive` (default true) lets a moved camera/scene drop to a cheap
+   *  preview quality so dragging stays responsive; pass false for the photo
+   *  export's fixed-camera accumulation loop, where every sample should be
+   *  full quality regardless of how the export camera compares to whatever
+   *  the live viewport was last showing. */
+  render(camera: THREE.PerspectiveCamera, lighting: RaytraceLighting, interactive = true) {
+    const cameraMoved = this.syncCamera(camera);
+    const environmentChanged = this.syncEnvironment(lighting);
     this.hasPreviousState = true;
+
+    const moving = interactive && (cameraMoved || environmentChanged);
+    this.updateRenderScale(moving);
+    this.accumulateMaterial.uniforms.uMaxBounces.value = moving ? MOVING_BOUNCES : FULL_BOUNCES;
 
     this.sampleCounter += 1;
     this.accumulateMaterial.uniforms.uFrameCounter.value = this.frameSeed++;
@@ -268,7 +327,7 @@ export class PathTracer {
    *  export resolution) doesn't freeze the tab for the whole run. */
   async renderSamples(count: number, camera: THREE.PerspectiveCamera, lighting: RaytraceLighting) {
     for (let i = 0; i < count; i++) {
-      this.render(camera, lighting);
+      this.render(camera, lighting, false);
       await new Promise(requestAnimationFrame);
     }
   }

@@ -146,10 +146,14 @@ night with the festoon lights lit.
   from a library (see `src/render/raytrace/`). It converges over a second or
   two once the camera stops moving, and resets on every orbit/pan/zoom, so
   it is meant for looking and for **Foto** (which renders it at a higher,
-  fixed sample count) rather than for editing. Materials are flattened to a
-  colour + emissive per triangle, so it is not pixel-for-pixel identical to
-  the rasterised view — texture detail and true reflections/refraction
-  (glass, water) are not modelled.
+  fixed sample count) rather than for editing. Full per-pixel path tracing
+  is too slow to redraw every frame of a drag, so while the camera is
+  actively moving it renders at reduced resolution and bounce count to stay
+  responsive, then sharpens back up over the next few frames once it stops
+  — orbiting/flying should never feel frozen, just softer while in motion.
+  Materials are flattened to a colour + emissive per triangle, so it is not
+  pixel-for-pixel identical to the rasterised view — texture detail and true
+  reflections/refraction (glass, water) are not modelled.
 
 ## How it is put together
 

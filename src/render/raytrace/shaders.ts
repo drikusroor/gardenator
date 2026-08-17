@@ -36,10 +36,13 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
   #define PI 3.14159265359
   #define ONE_OVER_PI 0.31830988618
   #define INFINITY 1.0e10
-  #define MAX_BOUNCES 4
   #define STACK_SIZE 64
 
   varying vec2 vUv;
+
+  // Lower while the camera is moving so orbit/fly/walk stays responsive —
+  // see PathTracer's render-scale ramp.
+  uniform int uMaxBounces;
 
   uniform sampler2D tTriangleTexture;
   uniform vec2 uTriangleTextureSize;
@@ -223,7 +226,7 @@ export const PATHTRACE_FRAGMENT = /* glsl */ `
     vec3 throughput = vec3(1.0);
     vec3 radiance = vec3(0.0);
 
-    for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+    for (int bounce = 0; bounce < uMaxBounces; bounce++) {
       vec3 hitNormal, hitColor, hitEmissive;
       float t = sceneIntersect(rayOrigin, rayDirection, hitNormal, hitColor, hitEmissive);
 
